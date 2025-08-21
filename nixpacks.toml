@@ -1,59 +1,92 @@
 # nixpacks.toml
 
+# Nixpacks будет управлять всем процессом сборки.
+# Мы хотим создать Nix-окружение (эквивалент shell.nix),
+# которое включает Node.js v20, npm и chromium.
+
 [build]
+# Используем Nix как основной инструмент сборки.
 providers = ["nix"]
 
-[nix]
-# Указываем конкретную версию channel/commit Nixpkgs
-# Это гарантирует, что мы используем версию Nixpkgs, которая точно поддерживает Node.js 20.
-# Используем ссылку на конкретный коммит или ветку.
-# Пример: "https://github.com/NixOS/nixpkgs/archive/YOUR_NIXPKGS_COMMIT_HASH.tar.gz"
-# Или, если предпочитаете использовать определенную ветку:
-# "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.11.tar.gz"
-# Если вы не уверены, можно попробовать использовать ветку "nixos-unstable".
-# Важно: Убедитесь, что используемая версия Nixpkgs гарантированно имеет Node.js 20.
-# Попробуйте эту ссылку на актуальную ветку:
-pkgsArchive = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.11.tar.gz" # Или "nixos-unstable"
+# Явно указываем версию Nixpkgs.
+# Крайне важно использовать версию, которая точно поддерживает Node.js 20.
+# Попробуйте конкретную ветку stable или unstable.
+# `nixos-23.11` - хорошая стабильная ветка.
+# `nixos-unstable` - самая свежая, но может содержать баги.
+# Вам может потребоваться поэкспериментировать с конкретным коммитом, если ветки не работают.
+pkgsArchive = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.05.tar.gz" # Попробуйте эту ссылку, это новая стабильная версия
+# Если не поможет, попробуйте: "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.11.tar.gz"
+# Или: "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-unstable.tar.gz"
 
-# Теперь, вместо nodejsSetup, мы явно укажем пакет nodejs_20
-# Эта конфигурация будет использоваться для вызова `nix-shell` или `nix build`.
-packages = [
-  # Указываем сам пакет Node.js 20
-  "nodejs_20",
-  "npm", # npm обычно идет с Node.js, но явно укажем.
-  "chromium", # Chromium для PDF конвертации.
+# Описываем построение Nix-окружения.
+# Это похоже на написание shell.nix или default.nix.
+# Это говорит Nix, что нужно собрать и сделать доступным.
+[nix.expression]
+render = """
+let
+  # Импортируем Nixpkgs из указанного архива.
+  pkgs = import pkgsArchive {};
 
-  # Добавьте любые другие системные библиотеки, если они требуются.
-  # Например: "libgbm", "freetype", "pango", "libcups", "libXrender", "libXext"
-]
+  # Определяем окружение Node.js v20.
+  # пакет `nodejs_20` уже включает npm.
+  nodejsEnv = pkgs.nodejsPackages.nodejs_20; # Используем пакет nodejs_20
 
-# Переменные окружения, которые будут доступны в контейнере.
-[nix.env]
-# Указываем путь к исполняемому файлу Node.js v20 из Nix.
-# Nixpacks автоматически подставляет реальный путь.
-NODE_PATH = "$pkgs.nodejs_20/lib/node_modules"
-PATH = "$pkgs.nodejs_20/bin:$PATH" # Включаем директорию Node.js v20 в PATH
+in
+# Создаем оболочку (shell) для нашего приложения.
+pkgs.mkShell {
+  # Список пакетов, которые будут доступны в среде.
+  # Это системные пакеты.
+  packages = [
+    nodejsEnv      # Делает `node`, `npm`, `npx` доступными из Node.js 20
+    pkgs.chromium  # Сам браузер Chromium.
 
-# Путь к Chromium.
-CHROMIUM_PATH = "$pkgs.chromium/bin/chromium"
-PUPPETEER_EXECUTABLE_PATH = "$pkgs.chromium/bin/chromium"
+    # Системные библиотеки, которые могут потребоваться Chromium для работы
+    # (часто включены в пакет chromium, но иногда стоит добавить явно)
+    pkgs.libgbm
+    pkgs.freetype
+    pkgs.pango
+    pkgs.libcups
+    pkgs.libXrender
+    pkgs.libXext
+    pkgs.glibc # базовая библиотека C, нужна почти везде
+    pkgs.libnotify
+  ];
 
-# =====================================================================
-#       КОМАНДЫ ДЛЯ СБОРКИ И ЗАПУСКА
-# =====================================================================
+  # Устанавливаем переменные окружения ОДИН РАЗ при создании окружения.
+  # Это более надежный способ, чем установка их в startCommand.
+  shellHook = ''
+    echo "--- Nix Environment Setup ---"
+    echo "Nixpkgs source: ${pkgsArchive}"
+    echo "Node.js version: $(node --version)"
+    echo "npm version: $(npm --version)"
+    echo "Chromium path: ${pkgs.chromium}/bin/chromium"
+    echo "---------------------------"
 
-# Команда для установки зависимостей. 'npm ci' предпочтительнее для CI.
-installCommand = "npm ci"
+    # Устанавливаем необходимые переменные для Chromium/Puppeteer.
+    export CHROMIUM_PATH="${pkgs.chromium}/bin/chromium"
+    export PUPPETEER_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium" # Если используется Puppeteer
 
-# Команда для запуска вашего приложения.
-# Мы будем явно использовать 'node' из Nixpkgs v20.
+    # Включаем директорию Node.js v20 в PATH.
+    # Это гарантирует, что 'node' и 'npm' будут из нужной версии.
+    export PATH="${pkgs.nodejs_20.bin}:$PATH"
+    export PATH="${pkgs.npm}/bin:$PATH" # Для надежности, чтобы npm тоже был из правильной версии
+  '';
+}
+"""
+
+# Команды, которые будут выполняться при сборке и запуске.
+# Эти команды выполняются ВНУТРИ Nix-окружения, описанного выше.
+installCommand = "npm ci" # Устанавливаем зависимости проекта.
 startCommand = """
-echo "--- Nix Environment Verification ---"
-echo "Using Node.js from PATH: $(node --version)"
-echo "Using npm from PATH: $(npm --version)"
-echo "Chromium path derived from env: ${CHROMIUM_PATH}"
-echo "--- Starting application ---"
-# Явно используем 'node', который теперь должен быть v20 из-за модификации PATH.
-# И передаем CHROMIUM_PATH для надежности.
-PATH="$PATH" CHROMIUM_PATH="$CHROMIUM_PATH" node server/index.js # Замените server/index.js на ваш основной стартовый файл, если он другой
+echo "--- Application Startup ---"
+# Проверяем версии, так как PATH был изменен в shellHook Nix.
+echo "Using Node.js version: $(node --version)"
+echo "Using npm version: $(npm --version)"
+echo "Chromium path (from env): ${CHROMIUM_PATH}"
+echo "Node binary path: $(which node)"
+
+# запускаем приложение.
+# Если ваш главный файл не 'index.js' или не в корне, измените путь.
+# Часто это 'server/index.js' или 'dist/index.js'.
+node server/index.js
 """
