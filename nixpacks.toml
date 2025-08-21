@@ -1,48 +1,59 @@
 # nixpacks.toml
 
 [build]
-# Использование Nix как менеджера пакетов.
 providers = ["nix"]
 
 [nix]
-# Явно указываем, что мы хотим использовать Node.js версии 20.
-# nodejsSetup гарантирует правильную установку и настройку PATH.
-nodejsSetup = { version = "20" }
+# Указываем конкретную версию channel/commit Nixpkgs
+# Это гарантирует, что мы используем версию Nixpkgs, которая точно поддерживает Node.js 20.
+# Используем ссылку на конкретный коммит или ветку.
+# Пример: "https://github.com/NixOS/nixpkgs/archive/YOUR_NIXPKGS_COMMIT_HASH.tar.gz"
+# Или, если предпочитаете использовать определенную ветку:
+# "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.11.tar.gz"
+# Если вы не уверены, можно попробовать использовать ветку "nixos-unstable".
+# Важно: Убедитесь, что используемая версия Nixpkgs гарантированно имеет Node.js 20.
+# Попробуйте эту ссылку на актуальную ветку:
+pkgsArchive = "https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-23.11.tar.gz" # Или "nixos-unstable"
 
-# Пакеты, которые необходимы вашему сервису.
+# Теперь, вместо nodejsSetup, мы явно укажем пакет nodejs_20
+# Эта конфигурация будет использоваться для вызова `nix-shell` или `nix build`.
 packages = [
-  "npm",          # npm обычно идет с Node.js, но для надежности укажем.
-  "chromium",     # Необходим для конвертации HTML в PDF.
-  # Если ваш сервис требует дополнительных системных библиотек (например, для графики),
-  # их можно добавить сюда, например: "libgbm", "freetype", "pango", "libcups".
+  # Указываем сам пакет Node.js 20
+  "nodejs_20",
+  "npm", # npm обычно идет с Node.js, но явно укажем.
+  "chromium", # Chromium для PDF конвертации.
+
+  # Добавьте любые другие системные библиотеки, если они требуются.
+  # Например: "libgbm", "freetype", "pango", "libcups", "libXrender", "libXext"
 ]
 
-# Переменные окружения, которые часто используются библиотеками для работы с браузерами.
+# Переменные окружения, которые будут доступны в контейнере.
 [nix.env]
+# Указываем путь к исполняемому файлу Node.js v20 из Nix.
+# Nixpacks автоматически подставляет реальный путь.
+NODE_PATH = "$pkgs.nodejs_20/lib/node_modules"
+PATH = "$pkgs.nodejs_20/bin:$PATH" # Включаем директорию Node.js v20 в PATH
+
+# Путь к Chromium.
 CHROMIUM_PATH = "$pkgs.chromium/bin/chromium"
-PUPPETEER_EXECUTABLE_PATH = "$pkgs.chromium/bin/chromium" # Если ваш сервис использует Puppeteer
+PUPPETEER_EXECUTABLE_PATH = "$pkgs.chromium/bin/chromium"
 
 # =====================================================================
-#       КОМАНДЫ ДЛЯ СБОРКИ И ЗАПУСКА, С ДИАГНОСТИКОЙ
+#       КОМАНДЫ ДЛЯ СБОРКИ И ЗАПУСКА
 # =====================================================================
 
 # Команда для установки зависимостей. 'npm ci' предпочтительнее для CI.
 installCommand = "npm ci"
 
-# Главная команда для запуска вашего приложения.
-# Здесь мы добавляем вывод версий Node.js перед запуском самого приложения.
-# Это поможет понять, какая версия Node.js действительно доступна.
+# Команда для запуска вашего приложения.
+# Мы будем явно использовать 'node' из Nixpkgs v20.
 startCommand = """
-echo "--- Node.js Environment Diagnosis ---"
-
-# 1. Прямой вызов Node.js из Nix-окружения (наиболее надежно)
-echo "Nix-managed Node.js version: $($pkgs.nodejs_20/bin/node --version)"
-
-# 2. Проверка версии Node.js, найденной в PATH (как её видит `npm start`)
-echo "Node.js version in PATH (via 'node --version'): $(node --version)"
-
-echo "--- Starting application --"
-
-# Запускаем ваше приложение, передавая CHROMIUM_PATH для надежности.
-CHROMIUM_PATH="$pkgs.chromium/bin/chromium" npm start
+echo "--- Nix Environment Verification ---"
+echo "Using Node.js from PATH: $(node --version)"
+echo "Using npm from PATH: $(npm --version)"
+echo "Chromium path derived from env: ${CHROMIUM_PATH}"
+echo "--- Starting application ---"
+# Явно используем 'node', который теперь должен быть v20 из-за модификации PATH.
+# И передаем CHROMIUM_PATH для надежности.
+PATH="$PATH" CHROMIUM_PATH="$CHROMIUM_PATH" node server/index.js # Замените server/index.js на ваш основной стартовый файл, если он другой
 """
