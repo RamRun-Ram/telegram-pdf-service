@@ -1,0 +1,10 @@
+# nixpacks.toml
+[build]
+providers = ["nix"]
+
+[nix]
+packages = [
+  "nodejs_20",
+  "npm",
+  "chromium"
+]
